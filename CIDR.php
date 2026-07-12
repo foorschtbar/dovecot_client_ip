@@ -2,8 +2,8 @@
 /**
  * CIDR class helps validate an ip address against a CIDR ip range.
  *
- * This class has not been optimized, but works comparing an ip address
- * with a wild card address or a CIDR ip range.
+ * This class compares IPv4 and IPv6 addresses with exact addresses or CIDR
+ * networks.
  *
  * @package     CIDR
  * @version     1.0
@@ -18,131 +18,104 @@ class CIDR{
    /**
 	* compare an IPv4 or IPv6 address with a CIDR address or range
 	*
-	* @param  string  $address a valid IPv6 address
-	* @param  string  $subnet a valid IPv6 subnet[/mask]
+	* @param  string  $ip a valid IPv4 or IPv6 address
+	* @param  string  $cidr a valid IPv4 or IPv6 address[/mask]
 	* @return boolean	whether $address is within the ip range made up  of the subnet and mask
 	*/
     public static function match($ip, $cidr){
-		
-		// make sure we compare ip addresses as case insensitive
-		$ip = strtolower($ip);
-		$cidr = strtolower($cidr);
-		
-		// comparing exact ip?
-		if($ip == $cidr){ return true; }
-
-		
-		if(strpos($cidr,'/') !== false){
-			 list($subnet, $mask) = explode('/', $cidr);
-		} else {
-			$subnet = $cidr;
-			$mask = 0;
+		if (!is_string($ip)) {
+			return false;
 		}
 
-		// validate ips and shorten them
-        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
-
-			$ipVersion = 'v4';
-			// shorten ip
-			$ip = preg_replace( '/^(.*\.|.*:)?0+([1-9])/','$1$2',$ip );
-
-        } elseif (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6)) {
-
-			$ipVersion = 'v6';
-			// shorten ip
-			$ip = self::IPv6_compress($ip);
-
-		} else {
-
-			return false; // invalid ip
-        }
-
-		// shorten cidr and subnet
-		if(strpos($subnet,':') === false)
-		{
-			$subnet = preg_replace( '/^(.*\.|.*:)?0+([1-9])/','$1$2',$subnet );
-		}
-		else
-		{
-			$pos = strpos($subnet,'*');
-			if($pos !== false)
-			{
-				$subnet = substr($subnet,0,$pos);
-				$i = 0;
-				$subnet = explode(':',$subnet);
-				$size = $j = sizeof($subnet);
-				while($j < 8){
-					$subnet[] = '0';
-					$j++;
-					$i++;
-				}
-				$subnet = implode(':',$subnet);
-				if(substr($subnet,-1) == ':'){
-					$subnet .= '0';
-				}
-			}
-			
-			$subnet = self::IPv6_compress($subnet);
-			
-			if($pos !== false)
-			{
-				$subnet = explode(':',$subnet);
-				$j = sizeof($subnet);
-				while($j > $size)
-				{
-					array_pop($subnet);
-					$j--;
-				}
-				$subnet = implode(':',$subnet).'*';
-			}
+		$ip = trim($ip);
+		if (filter_var($ip, FILTER_VALIDATE_IP) === false) {
+			return false;
 		}
 
-		// shortened cidr
-		$cidr = ($mask ? $subnet.'/'.$mask : $subnet);
-		
-		// if $cidr is ipv6, convert $ip to ipv6 for easier comparison
-		if(strpos($subnet,':') !== false && $ipVersion == 'v4') {
-			
-			$v6bits = array('0000','0000','0000','0000','0000','0000',$ip);
-			
-			$ip4parts = explode('.', $v6bits[count($v6bits)-1]);
-			$ip6trans = sprintf("%02x%02x:%02x%02x", $ip4parts[0], $ip4parts[1], $ip4parts[2], $ip4parts[3]);
-			$v6bits[count($v6bits)-1] = $ip6trans;
+		$packedIp = inet_pton($ip);
+		$network = self::parseNetwork($cidr);
 
-			$ip = implode(':', $v6bits);
-			// shorten ip
-			$ip = self::IPv6_compress($ip);
-			
-			$ipVersion = 'v6';
+		if ($packedIp === false || $network === false) {
+			return false;
 		}
 
-		if($ip == $cidr)
-		{
+		$packedSubnet = $network[0];
+		$mask = $network[1];
+
+		if (strlen($packedIp) !== strlen($packedSubnet)) {
+			return false;
+		}
+
+		$wholeBytes = (int) floor($mask / 8);
+		$remainingBits = $mask % 8;
+
+		if ($wholeBytes > 0 && substr($packedIp, 0, $wholeBytes) !== substr($packedSubnet, 0, $wholeBytes)) {
+			return false;
+		}
+
+		if ($remainingBits === 0) {
 			return true;
 		}
 
-		// wildcard matching (easier since we already shortened or "canonicalized" ip and cidr above)
-		$pos = strpos($cidr,'*');
-		if($pos !== false)
-		{
-			if(substr($ip,0,$pos) == substr($cidr,0,$pos))
-			{
-				return true;
-			}
-			else
-			{
-				return false;
-			}
+		$maskByte = (0xFF << (8 - $remainingBits)) & 0xFF;
+
+		return (ord($packedIp[$wholeBytes]) & $maskByte) === (ord($packedSubnet[$wholeBytes]) & $maskByte);
+    }
+
+    /**
+	* Check whether an exact IP or CIDR network is valid.
+	*
+	* @param mixed $network
+	* @return boolean
+	*/
+    public static function isValidNetwork($network)
+    {
+		return self::parseNetwork($network) !== false;
+    }
+
+    /**
+	* @param mixed $network
+	* @return array|false Packed subnet and mask size, or false when invalid.
+	*/
+    private static function parseNetwork($network)
+    {
+		if (!is_string($network)) {
+			return false;
 		}
 
-		 switch ($ipVersion) {
-            case 'v4':
-				return self::IPv4Match($ip, $subnet, $mask);
-                break;
-            case 'v6':
-				return self::IPv6Match($ip, $subnet, $mask);
-                break;
-        }
+		$network = trim($network);
+		if ($network === '' || substr_count($network, '/') > 1) {
+			return false;
+		}
+
+		$parts = explode('/', $network, 2);
+		$subnet = trim($parts[0]);
+		if (filter_var($subnet, FILTER_VALIDATE_IP) === false) {
+			return false;
+		}
+
+		$packedSubnet = inet_pton($subnet);
+
+		if ($packedSubnet === false) {
+			return false;
+		}
+
+		$maxMask = strlen($packedSubnet) * 8;
+		if (count($parts) === 1) {
+			return array($packedSubnet, $maxMask);
+		}
+
+		$mask = trim($parts[1]);
+		if ($mask === '' || !ctype_digit($mask)) {
+			return false;
+		}
+
+		$mask = (int) $mask;
+		if ($mask < 0 || $mask > $maxMask) {
+			return false;
+		}
+
+		return array($packedSubnet, $mask);
     }
 
 

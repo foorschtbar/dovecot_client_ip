@@ -1,8 +1,8 @@
 <?php
 
-// Array of trusted reverse proxy IP addresses. If empty or not configured, no
-// reverse proxy is taken into account and only the REMOTE_ADDR will be
-// reported. IPs are compared to REMOTE_ADDR.
+// Array of trusted reverse proxy IP addresses or CIDR networks. Forwarded and
+// X-Forwarded-For are accepted only when REMOTE_ADDR matches this list. If the
+// list is empty, headers are ignored and REMOTE_ADDR is reported.
 $config['dovecot_client_ip_trusted_proxies'] = [];
 // Whether to allow private range IPs in reverse proxy forwarded client
 // headers. Should only be enabled in private environments.

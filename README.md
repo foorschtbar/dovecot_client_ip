@@ -50,6 +50,28 @@ Configuration can also be overridden using environment variables:
 
 Environment variables take precedence over settings in the config files.
 
+### Trusted proxy security
+
+Forwarded headers are used only when the immediate `REMOTE_ADDR` matches a
+valid entry in `dovecot_client_ip_trusted_proxies`. The plugin supports the
+standard `Forwarded` header and `X-Forwarded-For`, processes proxy chains from
+right to left, and rejects malformed or contradictory chains.
+
+Every trusted proxy must remove untrusted forwarding headers or append its
+verified peer address to the chain. Do not configure networks that contain
+clients which are allowed to send forwarding headers directly. Empty and
+invalid proxy entries are ignored.
+
+When no trusted proxies are configured, all forwarding headers are ignored and
+the validated `REMOTE_ADDR` is sent to Dovecot.
+
+This hardening intentionally no longer accepts `Client-IP`, `X-Forwarded`,
+`X-Cluster-Client-IP`, or `Forwarded-For`. Configure the reverse proxy to
+write `Forwarded` or `X-Forwarded-For` instead. Wildcard proxy entries such as
+`192.168.*` and `2001:db8:*` must be replaced with their CIDR equivalents
+(`192.168.0.0/16` and `2001:db8::/32`). Because these changes can affect
+existing proxy configurations, they should be included in a major release.
+
 ### Dovecot IMAP
 The following settings need to be applied to the Dovecot IMAP server:
 1. Add the IP addresses or networks of your RoundCube webmail servers to the `login_trusted_networks` setting in your Dovecot IMAP configuration.
